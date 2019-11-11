@@ -37,7 +37,7 @@ class BertConfig(object):
 
 	@classmethod
 	def read_dict(cls, dict):
-		#################################################
+		###########[need to check later]################
 		config = BertConfig(vocab_size=None)
 		for (key, value) in dict.items():
 			config.__dict__[key] = value
@@ -157,3 +157,60 @@ class BertModel(object):
 		return self.embedding_table
 
 
+def gelu(x):
+	return 0.5 * x * (1.0 + tf.tanh(np.sqrt(2 / np.pi) * (x + 0.044715 * tf.pow(x, 3))))
+
+
+def get_activation(activation_type):
+	# if the instance of activation_type is not str,
+	# then it is assumed to be an activation function
+	# so it returns the value.
+	if not isinstance(activation_type, str):
+		return activation_type
+
+	# if activation_type is "None",
+	# then it is assumed to be linear activation.
+	if not activation_type:
+		return None
+
+	act = activation_type.lower()
+	if act == "linear":
+		return None
+	elif act == "relu":
+		return tf.nn.relu
+	elif act == "gelu":
+		# this is user-defined function
+		return gelu
+	elif act == "tanh":
+		return tf.tanh
+	else:
+		raise ValueError("Unsupported activation: %s" % act)
+
+###################[need to check later]######################
+def get_assignment_map_from_checkpoint(tvars, init_checkpoint):
+	assignment_map = {}
+	initialized_variable_names = {}
+
+	name_to_variable = collections.OrderedDict()
+	for var in tvars:
+		name = var.name
+		# "(".*)" means strings before ":\"
+		# "\\d+$" means int numbers after ":\"
+		m = re.match("^(.*):\\d+$", name)
+		if m is not None:
+			name = m.group(1)
+		name_to_variable[name] = var
+
+	init_vars = tf.train.list_variables(init_checkpoint)
+
+	assignment_map = collections.OrderedDict()
+	for x in init_vars:
+		(name, var) = (x[0], x[1])
+		if name not in name_to_variable:
+			continue
+		assignment_map[name] = name
+		initialized_variable_names[name] = 1
+		initialized_variable_names[name + ":0"] = 1
+
+	return (assignment_map, initialized_variable_names)
+###########################################################
