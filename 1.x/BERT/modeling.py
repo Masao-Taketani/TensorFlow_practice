@@ -214,3 +214,27 @@ def get_assignment_map_from_checkpoint(tvars, init_checkpoint):
 
 	return (assignment_map, initialized_variable_names)
 ###########################################################
+
+def dropout(input_tensor, dropout_prob):
+	if dropout_prob is None or dropout_prob == 0.0:
+		return input_tensor
+
+	output = tf.nn.dropout(input_tensor, 1.0 - dropout_prob)
+	return output
+
+
+def layer_norm(input_tensor, name=None):
+	return tf.contrib.layers.layer_norm(
+		inputs=input_tensor, begin_norm_axis=-1, begin_params_axis=-1, scope=name)
+
+
+def layer_norm_and_dropout(input_tensor, dropout_prob, name=None):
+	output_tensor = layer_norm(input_tensor, name)
+	output_tensor = dropout(output_tensor, dropout_prob)
+	return output_tensor
+
+
+def create_initializer(initializer_std=0.02):
+	return tf.truncated_normal_initializer(stddev=initializer_std)
+
+
