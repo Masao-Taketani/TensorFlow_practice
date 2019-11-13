@@ -90,7 +90,7 @@ class BertModel(object):
 				(self.embedding_output, self.embedding_table) = embedding_lookup(
 					input_ids=input_ids,
 					vocab_size=config.vocab_size,
-					embedding_size=config.hidden_dims,
+					embedding_dims=config.hidden_dims,
 					initializer_std=config.initializer_std,
 					word_embedding_name="word_embeddings",
 					use_one_hot_embeddings=use_one_hot_embeddings
@@ -238,3 +238,131 @@ def create_initializer(initializer_std=0.02):
 	return tf.truncated_normal_initializer(stddev=initializer_std)
 
 
+def embedding_lookup(input_ids,
+					 vocab_size,
+					 embedding_dims=128,
+					 initializer_std=0.02,
+					 word_embedding_name="word_embeddings",
+					 use_one_hot_embeddings=False):
+
+	if input_ids.shape.ndims == 2:
+		input_ids = tf.expand_dims(input_ids, axis=[-1])
+
+	embedding_table = tf.get_variable(
+		name=word_embedding_name,
+		shape=[vocab_size, embedding_dims],
+		initializer=create_initializer(initializer_std))
+
+	# -1 for shape: the rest of elems supposed to be in this dim,
+	# which means [-1] implies all of the elems are in this dim,
+	# which is flatten vector.
+	flat_input_ids = tf.reshape(input_ids, [-1])
+	if use_one_hot_embeddings:
+		one_hot_input_ids = tf.one_hot(flat_input_ids, depth=vocab_size)
+		output = tf.matmul(one_hot_input_ids, embedding_table)
+	else:
+		output = tf.gather(embedding_table, flat_input_ids)
+
+	input_shape = get_shape_list(input_ids)
+
+	output = tf.reshape(output,
+		input_shape[0:-1] + [input_shape[-1] * embedding_dims])
+	return (output, embedding_table)
+
+
+def embedding_postprocessor(input_tensor,
+							use_token_type=False,
+							token_type_ids=None,
+							token_type_vocab_size=16,
+							token_type_embedding_name="token_type_embeddings",
+							use_position_embeddings=True,
+							position_embedding_name="position_embeddings",
+							initializer_std=0.02,
+							max_seq_length=512,
+							dropout_prob=0.1):
+
+	input_shape = get_shape_list(input_tensor, expected_rank=3)
+	batch_size, seq_length, width = input_shape
+
+	output = input_tensor
+
+	if use_token_type:
+		if token_type_ids is None:
+			raise ValueError("'token_type_ids' must be specified if 'use_token_type' is True.")
+		token_type_table = tf.get_variable(
+			name=token_type_embedding_name,
+			# dims: from 16 to 512 if default value is used
+			shape=[token_type_vocab_size, width],
+			initializer=create_initializer(initializer_std))
+		# use one-hot for token type ids
+		flat_token_type_ids = tf.reshape(token_type_ids, [-1])
+		one_hot_ids = tf.one_hot(flat_token_type_ids, depth=token_type_vocab_size)
+		token_type_embeddings = tf.matmul(one_hot_ids, token_type_table)
+		token_type_embeddings = tf.reshape(token_type_embeddings,
+			[batch_size, seq_length, width])
+		output += token_type_embeddings
+
+		if use_position_embeddings:
+			# if "x <= y" is false, it raises "InvalidArgumentError" 
+			assert_op = tf.assert_less_equal(seq_length, max_seq_length)
+			# it defines dependency of a computational graphs
+			with tf.control_dependencies([assert_op]):
+				full_position_embeddings = tf.get_variable(
+					name=position_embedding_name,
+					shape=[max_seq_length, width],
+					initializer=create_initializer(initializer_std))
+
+				# tf.slice(input, begin_position, extract_size)
+				position_embeddings = tf.slice(full_position_embeddings,
+											   [0, 0],
+											   [seq_length, -1])
+				#num_dims: the number of dims
+				num_dims = len(output.shape.as_list())
+
+				position_broadcast_shape = []
+				for _ in range(num_dims - 2):
+					position_broadcast_shape.append(1)
+				# extend: ex [1].extend([seq_length, width]) => [1, seq_length, width]
+				position_broadcast_shape.extend([seq_length, width])
+				position_embeddings = tf.rehsape(position_embeddings,
+												 position_broadcast_shape)
+				output += position_embeddings
+
+		output = layer_norm_and_dropout(output, dropout_prob)
+		return output
+
+
+def create_attention_mask_from_input_mask(from_tensor, to_mask):
+	from_shape = get_shape_list(from_tensor, expected_rank=[2, 3])
+	batch_size = from_shape[0]
+	from_seq_length = from_shape[1]
+
+	to_shape = get_shape_list(to_mask, expected_rank=2)
+	to_seq_length = to_shape[1]
+
+	to_mask = tf.cast(
+		tf.reshape(to_mask, [batch_size, 1, to_seq_length]), tf.float32)
+
+	broadcast_ones = tf.ones(
+		shape=[batch_size, from_seq_length, 1], dtype=tf.float32)
+
+	mask = broadcast_ones * to_mask
+	return mask
+
+
+def attention_layer(from_tensor,
+					to_tensor,
+					attention_mask=None,
+					num_attention_heads=1,
+					size_per_head=512,
+					query_act=None,
+					key_act=None,
+					value_act=None,
+					attention_probs_dropout_prob=0.0,
+					initializer_std=0.02,
+					do_return_2d_tensor=False,
+					batch_size=None,
+					from_seq_length=None,
+					to_seq_length=None):
+
+	
