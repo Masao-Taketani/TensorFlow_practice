@@ -365,4 +365,109 @@ def attention_layer(from_tensor,
 					from_seq_length=None,
 					to_seq_length=None):
 
-	
+	# if from_attention == to_attention, then it is self-attention.
+	# attention_mask: it disregards the padded parts
+
+	def transpose_for_scores(input_tensor, batch_size, num_attention_heads,
+		seq_length, width):
+		output_tensor = tf.reshape(input_tensor,
+			[batch_size, seq_length, num_attention_heads, width])
+		return tf.transpose(output_tensor, [0, 2, 1, 3])
+
+	from_shape = get_shape_list(from_tensor, expected_rank=[2, 3])
+	to_shape = get_shape_list(to_tensor, expected_rank=[2, 3])
+
+	if len(from_shape) != len(to_shape):
+		raise ValusError(
+			"the rank of 'from_tensor' must match the rank of 'to_tensor'.")
+
+	if len(from_shape) == 3:
+		batch_size = from_shape[0]
+		from_seq_length = from_shape[1]
+		to_seq_length = to_shape[1]
+	elif len(from_shape) == 2:
+		if (batch_size is None or from_seq_length is None or to_seq_length is None):
+			raise ValueError(
+				"When passing in rank 2 tensors to attention_layer, the values \
+				for 'batch_size', 'from_seq_length' and 'to_seq_length' \
+				must all be specified.")
+
+	from_tensor_2d = reshape_to_matrix(from_tensor)
+	to_tensor_2d = reshape_to_matrix(to_tensor)
+
+	query_layer = tf.layers.dense(
+		from_tensor_2d,
+		num_attention_heads * size_per_head,
+		activation=query_act,
+		name="query",
+		kernel_initializer=create_initializer(initializer_std))
+
+	key_layer = tf.layers.dense(
+		to_tensor_2d,
+		num_attention_heads * size_per_head,
+		activation=key_act,
+		name="key",
+		kernel_initializer=create_initializer(initializer_std))
+
+	value_layer = tf.layers.dense(
+		to_tensor_2d,
+		num_attention_heads * size_per_head,
+		activation=value_act,
+		name="value",
+		kernel_initializer=create_initializer(initializer_std))
+
+	query_layer = transpose_for_scores(query_layer, batch_size,
+									  num_attention_heads, from_seq_length,
+									  size_per_head)
+
+	key_layer = transpose_for_scores(key_layer, batch_size,
+									num_attention_heads, to_seq_length,
+									size_per_head)
+
+
+	# perfrom scaled-dot product
+	attention_scores = tf.matmul(query_layer, key_layer, transpose_b=True)
+	attention_scores = tf.multiply(attention_scores,
+								   1.0 / math.sqrt(float(size_per_head)))
+
+	if attention_mask is not None:
+		# to make the dims attention_mask from [batch, fro_seq_len, to_seq_len]
+		# to [batch, 1, from_seq_len, to_seq_len]
+		attention_mask = tf.expand_dims(attention_mask, axis=[1])
+
+		# We are inputing the calcuated attention_scores into softmax act.
+		# So we want to input the original values for thoese masked as 1s
+		# and -inf for the ones masked as 0s into the softmax act.
+		# That way, we can ignore the weights for the values that are 
+		# masked as 0s.
+		adder = (1.0 -tf.cast(attention_mask, tf.float32)) * -10000.0
+		attention_scores += adder
+
+	attention_probs = tf.nn.softmax(attention_scores)
+
+	attention_probs = dropout(attention_probs, attention_probs_dropout_prob)
+
+	value_layer = tf.reshape(
+		value_layer,
+		[batch_size, to_seq_length, num_attention_heads, size_per_head])
+	value_layer = tf.transpose(value_layer, [0, 2, 1, 3])
+
+	# multiplication of
+	# [batch, num_heads, from_seq_len, to_seq_len] and
+	# [batch, num_heads, to_seq_len, size_per_head]
+	context_layer = tf.matmul(attention_probs, value_layer)
+	# change the shape into original input shape
+	context_layer = tf.transpose(context_layer, [0, 2, 1, 3])
+
+	if do_return_2d_tensor:
+		context_layer = tf.reshape(
+			context_layer,
+			[batch_size * from_seq_length, num_attention_heads * size_per_head])
+	else:
+		context_layer = tf.reshape(
+			context_layer,
+			[batch_size, from_seq_length, num_attention_heads * size_per_head])
+
+	return context_layer
+
+
