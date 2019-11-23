@@ -29,7 +29,7 @@ class BertConfig(object):
 		self.num_attention_heads = num_attention_heads
 		self.hidden_act = hidden_act
 		self.dense_hidden_dims = dense_hidden_dims
-		self.hidden_dropout_probs = hidden_dropout_probs
+		self.hidden_dropout_prob = hidden_dropout_prob
 		self.attention_probs_dropout_prob = attention_probs_dropout_prob
 		self.max_seq_length = max_seq_length
 		self.type_vocab_size = type_vocab_size
@@ -469,5 +469,104 @@ def attention_layer(from_tensor,
 			[batch_size, from_seq_length, num_attention_heads * size_per_head])
 
 	return context_layer
+
+
+def transformer_model(input_tensor,
+					  attention_mask=None,
+					  hidden_dims=768,
+					  num_hidden_layers=12,
+					  num_attention_heads=12,
+					  intermediate_size=3072,
+					  intermediate_act_fn=gelu,
+					  hidden_dropout_prob=0.1,
+					  attention_probs_dropout_prob=0.1,
+					  initializer_std=0.02,
+					  do_return_all_layers=False):
+
+	if hidden_dims % num_attention_heads !=0:
+		raise ValueError(
+			"The hidden dims (%d) is not a multiple of the of the number of attention \
+			heads (%d)" % (hidden_dims, num_attention_heads))
+
+	dims_per_head = int(hidden_size / num_attention_heads)
+	input_shape = get_shape_list(input_tensor, expected_rank=3)
+	batch_size = input_shape[0]
+	seq_length = input_shape[1]
+	input_width = input_shape[2]
+
+	if input_width != hidden_dims:
+		raise ValueError("The width of the input tensor (%d) != hidden dims (%d)"
+			% (input_width, hidden_dims))
+
+	prev_output = reshape_to_matrix(input_tensor)
+
+	all_layer_outputs = []
+	# perfrom attention_layers and feed-forward layers for specified
+	# num_hidden_layers times.
+	# for each layer we need to include the skip connection.
+	# for the feed-forward layer, first dense includes gelu act and
+	# second dense does not include any act.
+	for layer_idx in range(num_hidden_layers):
+		with tf.variable_scope("layer_%d" % layer_idx):
+			layer_input = prev_output
+
+			with tf.variable_scope("attention"):
+				attention_heads = []
+				with tf.variable_scope("self"):
+					attention_head = attention_layer(
+						from_tensor=layer_input,
+						to_tensor=layer_input,
+						attention_mask=attention_mask,
+						num_attention_heads=num_attention_heads,
+						size_per_head=dims_per_head,
+						attention_probs_dropout_prob=attention_probs_dropout_prob,
+						initializer_std=initializer_std,
+						do_return_2d_tensor=True,
+						batch_size=batch_size,
+						from_seq_length=seq_length,
+						to_seq_length=seq_length)
+					attention_heads.append(attention_head)
+
+				attention_output = None
+				if len(attention_heads) == 1:
+					attention_output = attention_heads[0]
+				else:
+					attention_output = tf.concat(attention_heads, axis=-1)
+
+				with tf.variable_scope("output"):
+					attention_output = tf.layers.dense(
+						attention_output,
+						hidden_dims,
+						kernel_initializer=create_initializer(initializer_std))
+					attention_output = dropout(attention_output, hidden_dropout_prob)
+					# perform residual connection % layer norm
+					attention_output = layer_norm(attention_output + layer_input)
+
+			with tf.variable_scope("intermediate"):
+				intermediate_output = tf.layers.dense(
+					attention_output,
+					intermediate_size,
+					activation=intermediate_act_fn,
+					kernel_initializer=create_initializer(initializer_std))
+
+			with tf.variable_scope("output"):
+				layer_output = tf.layers.dense(
+					intermediate_output,
+					hidden_dims,
+					kernel_initializer=create_initializer(initializer_std))
+				layer_output = dropout(layer_output, hidden_dropout_prob)
+				layer_output = layer_norm(layer_output + attention_output)
+				prev_output = layer_output
+				all_layer_outputs.append(layer_output)
+
+	if do_return_all_layers:
+		final_outputs = []
+		for layer_output in all_layer_outputs:
+			final_output = reshape_from_matrix(layer_output, input_shape)
+			final_outputs.append(final_output)
+		return final_outputs
+	else:
+		final_output = reshape_from_matrix(prev_output, input_shape)
+		return final_output
 
 
