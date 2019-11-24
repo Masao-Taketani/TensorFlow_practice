@@ -569,4 +569,71 @@ def transformer_model(input_tensor,
 		final_output = reshape_from_matrix(prev_output, input_shape)
 		return final_output
 
+###################[need to check later]######################
+def get_shape_list(tensor, expected_rank=None, name=None):
+	if name is None:
+		name = tensor.name
 
+	if expected_rank is not None:
+		assert_rank(tensor, expected_rank, name)
+
+	shape = tensor.as_list()
+
+	non_static_indexes = []
+	for (index, dim) in enumerate(shape):
+		if dim is None:
+			non_static_indexes.append(index)
+
+	if not non_static_indexes:
+		return shape
+
+	dyn_shape = tf.shape(tensor)
+	for index in non_static_indexes:
+		shape[index] = dyn_shape[index]
+	return shape
+##################################################################
+
+def reshape_to_matrix(input_tensor):
+	ndims = input_tensor.shape.ndims
+	if ndims < 2:
+		raise ValueError("input tensor must have at least rank 2. \
+			Shape = %s" % (input_tensor.shape))
+	if ndims == 2:
+		return input_tensor
+
+	width = input_tensor.shape[-1]
+	output_tensor = tf.reshape(input_tensor, [-1, width])
+	return output_tensor
+
+
+def reshape_from_matrix(output_tensor, orig_shape_list):
+	if len(orig_shape_list) == 2:
+		return output_tensor
+
+	output_shape = get_shape_list(output_tensor)
+
+	orig_dims = orig_shape_list[0:-1]
+	width = output_shape[-1]
+
+	return tf.reshape(output_tensor, orig_dims + [width])
+
+###################[need to check later]######################
+def assert_rank(tensor, expected_rank, name=None):
+	if name is None:
+		name = tensor.name
+
+	expected_rank_dict = {}
+	if isinstance(expected_rank, int):
+		expected_rank_dict[expected_rank] = True
+	else:
+		for x in expected_rank:
+			expected_rank_dict[x] = True
+
+	actual_rank = tensor.shape.ndims
+	if actual_rank not in expected_rank_dict:
+		scope_name = tf.get_variable_scope().name
+		raise ValueError(
+			"For the tensor '%s' in scope '%s', the actual rank \
+			'%d' (shape = %s) is not equal to the expected rank '%s'"
+			% (name, scope_name, actual_rank, str(tensor.shape), str(expected_rank)))
+##############################################################
