@@ -246,4 +246,99 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
 
 	return model_fn
 
+# positions: word positions that are masked
+def get_masked_lm_output(bert_config, input_tensor, output_weights, positions,
+						 label_ids, label_weights):
+ 
+ 	input_tensor = gather_indexes(input_tensor, positions)
+
+ 	with tf.variable_scope("cls/predictions"):
+ 		# The weight matrix is not used after pre-training
+ 		with tf.variable_scope("transform"):
+ 			input_tensor = tf.layers.dense(
+ 				input_tensor,
+ 				units=bert_config.hidden_dims,
+ 				activation=modeling.get_activation(bert_config.hidden_act),
+ 				kernel_initializer=modeling.create_initializer(
+ 					bert_config.initializer_std))
+ 			input_tensor = modeling.layer_norm(input_tensor)
+
+ 		# The output weights are the same as input embeddings, but there is 
+ 		# an bias vector for the output for each token
+ 		output_bias = tf.get_variable(
+ 			"output_bias",
+ 			shape=[bert_config.vocab_size],
+ 			initializer=tf.zeros_initializer())
+ 		logits = tf.matmul(input_tensor, output_weights, transpose_b=True)
+ 		logits = tf.nn.bias_add(logits, output_bias)
+ 		# log_softmax applies logarithm after softmax.
+		#softmax:
+		#exp(x_i) / exp(x).sum()
+		#log_softmax:
+		#log( exp(x_i) / exp(x).sum() )
+ 		log_probs = tf.nn.log_softmax(logits, axis=-1)
+
+ 		label_ids = tf.reshape(label_ids, [-1])
+ 		label_weights = tf.reshape(label_weights, [-1])
+
+ 		one_hot_labels = tf.one_hot(label_ids,
+ 									depth=bert_config.vocab_size,
+ 									dtype=tf.float32)
+
+ 		# 'label_weights' tensor has a value of 1.0 for 
+ 		# real predictions and 0.0 for the padding predictions.
+ 		per_example_loss = tf.reduce_sum(log_probs * one_hot_labels, axis=[-1])
+ 		numerator = tf.reduce_sum(label_weights * per_example_loss)
+ 		denominator = tf.reduce_sum(label_weights) + 1e-5
+ 		# compute the loss only from the real predictions
+ 		loss = numerator / denominator
+
+ 	return (loss, per_example_loss, log_probs)
+
+
+def get_next_sentence_output(bert_config, input_tensor, labels):
+
+	# 0 for "next sentence" and 1 for "random sentence"
+	# so you may think of the classifier as sentence inconsistent
+	# classifier
+	# The weight matrix is not used after pre-training
+	with tf.variable_scope("cls/seq_relationship"):
+		# the shape of the weights is [2, bert's hidden dim]
+		# since they will be transposed
+		output_weights = tf.get_variable(
+			"output_weights",
+			shape=[2, bert_config.hidden_dims],
+			initializer=modeling.create_initializer(bert_config.initializer_std))
+		output_bias = tf.get_variable("output_bias",
+									  shape=[2],
+									  initializer=tf.zeros_initializer())
+
+		logits = tf.matmul(input_tensor, output_weights, transpose_b=True)
+		logits = tf.nn.bias_add(logits, output_bias)
+		log_probs = tf.nn.log_softmax(logits, axis=-1)
+		labels = tf.reshape(labels, [-1])
+		one_hot_labels = tf.one_hot(labels,
+									depth=2,
+									dtype=tf.float32)
+		per_example_loss = tf.reduce_sum(log_probs * one_hot_labels, axis=-1)
+		loss = tf.reduce_mean(per_example_loss)
+		return (loss, per_example_loss, log_probs)
+
+
+def gather_indexes(sequence_tensor, positions):
+
+	sequence_shape = modeling.get_shape_list(sequence_tensor, expected_rank=3)
+	batch_size = sequence_shape[0]
+	seq_length = sequence_shape[1]
+	hidden_dims = sequence_shape[2]
+
+	flat_offsets = tf.reshape(
+		tf.range(0, batch_size, dtype=tf.int32) * seq_length,
+		[-1, 1])
+	flat_positions = tf.reshape(positions + flat_offsets, [-1])
+	flat_sequence_tensor = tf.reshape(sequence_tensor,
+									  [batch_size * seq_length, hidden_dims])
+	output_tensor = tf.gather(flat_sequence_tensor, flat_positions)
+	return output_tensor
+
 
