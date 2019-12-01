@@ -324,7 +324,7 @@ def get_next_sentence_output(bert_config, input_tensor, labels):
 		loss = tf.reduce_mean(per_example_loss)
 		return (loss, per_example_loss, log_probs)
 
-
+##########################[need to review]##########################
 def gather_indexes(sequence_tensor, positions):
 
 	sequence_shape = modeling.get_shape_list(sequence_tensor, expected_rank=3)
@@ -340,5 +340,163 @@ def gather_indexes(sequence_tensor, positions):
 									  [batch_size * seq_length, hidden_dims])
 	output_tensor = tf.gather(flat_sequence_tensor, flat_positions)
 	return output_tensor
+#####################################################################
+
+def input_fn_builder(input_files,
+					 max_seq_length,
+					 max_predictions_per_seq,
+					 is_training,
+					 num_cpu_threads=4):
+
+	def input_fun(params):
+
+		batch_size = params["batch_size"]
+
+		name_to_features = {
+			"input_ids":
+				tf.FixedLenFeature([max_seq_length], tf.int64),
+			"input_mask":
+				tf.
+				FixedLenFeature([max_seq_length], tf.int64),
+			"segment_ids":
+				tf.FixedLenFeature([max_seq_length], tf.int64),
+			"masked_lm_positions":
+				tf.FixedLenFeature([max_predictions_per_seq], tf.int64),
+			"masked_lm_ids":
+				tf.FixedLenFeature([max_predictions_per_seq], tf.int64),
+			"masked_lm_weights":
+				tf.FixedLenFeature([max_predictions_per_seq], tf.float32),
+			"next_sentence_labels":
+			tf.FixedLenFeature([1], tf.int64)
+		}
+
+		if is_training:
+			d = tf.data.Dataset.from_tensor_slices(tf.constant(input_files))
+			d = d.repeat()
+			d = d.shuffle(buffer_size=len(input_files))
+
+			# cycle_length: # of parallel files that are read
+			cycle_length = min(num_cpu_threads, len(input_files))
+
+			d = d.apply(
+				tf.contrib.data.parallel_interleave(
+					tf.data.TFRecordDataset,
+					sloppy=is_training,
+					cycle_length=cycle_length))
+			d = d.shuffle(buffer_size=100)
+
+		else:
+			d = tf.data.TFRecordDataset(input_files)
+			d = d.repeat()
+
+		d = d.apply(
+			tf.contrib.data.map_and_batch(
+				lambda record: _decode_record(record, name_to_features),
+				batch_size=batch_size,
+				num_parallel_batchs=num_cpu_threads,
+				drop_remainder=True))
+		return d
+
+	return input_fn
+
+# since a TPU only supports tf.int32, whenever we have tf.int64
+# for values, we need to cast it into tf.int32
+def _decode_record(record, name_to_features):
+
+	example = tf.parse_single_example(record, name_to_features)
+
+	for name in list(example.keys()):
+		t = example[name]
+		if t.dtype == tf.int64:
+			t = tf.to_int32(t)
+		example[name] = t
+
+	return example
 
 
+def main(_):
+	tf.logging.set_verbocity(tf.logging.INFO)
+
+	if not FLAGS.do_train and not FLAGS.do_eval:
+		raise ValueError("At least one of 'do_train' or 'do_eval' must be True.")
+
+	bert_config = modeling.BertConfig.from_json_file(bert_config_file.name)
+
+	tf.gfile.MakeDirs(FLAGS.output_dir)
+
+	input_files = []
+	for input_pattern in FLAGS.input_file.split(","):
+		input_files.extend(tf.gfile.Glob(input_pattern))
+
+	tf.logging.info("*** Input Files ***")
+	for input_file in input_files:
+		tf.logging.info(" %s" % input_file)
+
+	tpu_cluster_resolver = None
+	if FLAGS.use_tpu and FLAGS.tpu_name:
+		tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
+			FLAGS.tpu_name, zone=FLAGS.tpu_zone, project=FLAGS.gcp_projects)
+
+	is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
+	run_config = tf.contrib.tpu.RunConfig(
+		cluster=tpu_cluster_resolver,
+		master=FLAGS.master,
+		model_dir=FLAGS.output_dir,
+		save_checkpoints_steps=FLAGS.save_checkpoints_steps,
+		tpu_config=tf.contrib.tpu.TPUConfig(
+			iterations_per_loop=FLAGS.iterations_per_loop,
+			num_shareds=FLAGS.num_tpu_cores,
+			per_host_input_for_training=is_per_host))
+
+	model_fn = model_fn_builder(
+		bert_config=bert_config,
+		init_checkpoint=FLAGS.init_checkpoint,
+		learning_rate=FLAGS.learning_rate,
+		num_train_steps=FLAGS.num_train_steps,
+		num_warmup_steps=FLAGS.num_warmup_steps,
+		use_tpu=FLAGS.use_tpu,
+		use_one_hot_embeddings=FLAGS.use_tpu)
+
+	# If TPU is not available, CPU or GPU will be used for estimator
+	estimator = tf.contrib.tpu.TPUEstimator(
+		use_tpu=FLAGS.use_tpu,
+		model_fn=model_fn,
+		config=run_config,
+		train_batch_size=FLAGS.train_batch_size,
+		eval_batch_size=FLAGS.eval_batch_size)
+
+	if FLAGS.do_train:
+		tf.logging.info("***** Running training *****")
+		tf.logging.info(" Batch size = %d", FLAGS.train_batch_size)
+		train_input_fn = input_fn_builder(
+			input_files=input_files,
+			max_seq_length=FLAGS.max_seq_length,
+			max_predictions_per_seq=FLAGS.max_predictions_per_seq,
+			is_training=True)
+		estimator.train(input_fn=train_input_fn, max_steps=FLAGS.num_train_steps)
+
+	if FLAGS.do_eval:
+		tf.logging.info("***** Running evaluation *****")
+		tf.logging.info(" Batch size = %d", FLAGS.eval_batch_size)
+
+		eval_input_fn = input_fn_builder(
+			input_files=input_files,
+			max_seq_length=FLAGS.max_seq_length,
+			max_predictions_per_seq=FLAGS.max_predictions_per_seq,
+			is_training=False)
+
+		result = estimator.evaluate(
+			input_fn=eval_input_fn, steps=FLAGS.max_eval_steps)
+
+		output_eval_file = os.path.join(FLAGS.output_dir, "eval_results.txt")
+		with tf.gfile.GFile(output_eval_file, "w") as writer:
+			tf.logging.info("***** Eval results *****")
+			for key in sorted(result.keys()):
+				tf.logging.info(" %s = %s", key, str(result[key]))
+				writer.write("%s = %s\n" % (key, str(result[key])))
+
+
+if __name__ == "__main__":
+	flags.mark_flag_as_required("input_file")
+	flags.mark_flag_as_required("output_dir")
+	tf.app.run()
