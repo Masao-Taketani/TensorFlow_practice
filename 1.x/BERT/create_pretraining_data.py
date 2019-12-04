@@ -169,3 +169,40 @@ def write_instance_to_example_files(instances, tokenizer, max_seq_length,
 
 # if you use functions below, you can convert values into data types which are
 # compatible to tf.Example
+def create_int_feature(values):
+	feature = tf.train.Feature(int64_list=tf.train.Int64List(value=list(values)))
+	return feature
+
+
+def create_float_feature(values):
+	feature = tf.train.Feature(float_list=tf.train.FloatList(value=list(values)))
+	return feature
+
+# This func is to create 'TrainingInstance's from raw text.
+def create_training_instances(input_files, tokenizer, max_seq_length, dupe_factor,
+							  short_seq_prob, masked_lm_prob, max_predictions_per_seq,
+							  rng):
+
+	""" input_files format
+	(1) One sentence per line since those sentences are also usedfor 
+		"next sentence prediction" task.
+	(2) Blank lines between docs since it does not want 
+		"next sentence prediction" task to predict unrelated
+		sentences."""
+	all_documents = [[]]
+
+	for input_file in input_files:
+		with tf.gfile.GFile(input_file, "r") as reader:
+			while True:
+				line = tokenization.convert_to_unicode(reader.readline())
+				if not line:
+					break
+				line = line.strip()
+
+				if not line:
+					all_documents.append([])
+				tokens = tokenizer.tokenize(line)
+				if tokens:
+					all_documents[-1].append(tokens)
+
+
