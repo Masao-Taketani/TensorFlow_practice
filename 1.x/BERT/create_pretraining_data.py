@@ -199,10 +199,27 @@ def create_training_instances(input_files, tokenizer, max_seq_length, dupe_facto
 					break
 				line = line.strip()
 
+				# Empty lines are used as document delimiters
 				if not line:
 					all_documents.append([])
 				tokens = tokenizer.tokenize(line)
 				if tokens:
 					all_documents[-1].append(tokens)
+
+	# Remove empty documents
+	all_documents = [x for x in all_documents if x]
+	rng.shuffle(all_documents)
+
+	vocab_words = list(tokenizer.vocab.keys())
+	instances = []
+	for _ in range(dupe_factor):
+		for document_index in range(len(all_documents)):
+			intances.extend(
+				create_instances_from_document(
+					all_documents, document_index, max_seq_length, short_seq_prob,
+					masked_lm_prob, max_predictions_per_seq, vocab_words, rng))
+
+	rng.shuffle(instances)
+	return instances
 
 
