@@ -41,7 +41,11 @@ flags.DEFINE_float("short_seq_prob", 0.1,
 
 class TrainingInstance(object):
 
-	def __init__(self, tokens, segment_ids, masked_lm_positions, masked_lm_labels,
+	def __init__(self,
+				 tokens,
+				 segment_ids,
+				 masked_lm_positions,
+				 masked_lm_labels,
 				 is_random_next):
 
 		self.tokens = tokens
@@ -68,8 +72,11 @@ class TrainingInstance(object):
 		return self.__str__()
 
 
-def write_instance_to_example_files(instances, tokenizer, max_seq_length,
-									max_predictions_per_seq, output_files):
+def write_instance_to_example_files(instances,
+									tokenizer,
+									max_seq_length,
+									max_predictions_per_seq,
+									output_files):
 	# Create TF example files from 'TrainingInstance's'.
 	writers = []
 	for output_file in output_files:
@@ -179,12 +186,17 @@ def create_float_feature(values):
 	return feature
 
 # This func is to create 'TrainingInstance's from raw text.
-def create_training_instances(input_files, tokenizer, max_seq_length, dupe_factor,
-							  short_seq_prob, masked_lm_prob, max_predictions_per_seq,
+def create_training_instances(input_files,
+							  tokenizer,
+							  max_seq_length,
+							  dupe_factor,
+							  short_seq_prob,
+							  masked_lm_prob,
+							  max_predictions_per_seq,
 							  rng):
 
 	""" input_files format
-	(1) One sentence per line since those sentences are also usedfor 
+	(1) One sentence per line since those sentences are also used for 
 		"next sentence prediction" task.
 	(2) Blank lines between docs since it does not want 
 		"next sentence prediction" task to predict unrelated
@@ -200,6 +212,7 @@ def create_training_instances(input_files, tokenizer, max_seq_length, dupe_facto
 				line = line.strip()
 
 				# Empty lines are used as document delimiters
+				# if 'blank str' -> False
 				if not line:
 					all_documents.append([])
 				tokens = tokenizer.tokenize(line)
@@ -223,3 +236,76 @@ def create_training_instances(input_files, tokenizer, max_seq_length, dupe_facto
 	return instances
 
 
+def create_instances_from_documents(all_documents,
+									document_index,
+									max_seq_length,
+									short_seq_prob,
+									masked_lm_prob,
+									max_predictions_per_seq,
+									vocab_words,
+									rng):
+	# To create 'TrainingInstance's for a single document.
+	document = all_documents[document_index]
+
+	# exclude vocabs for [CLS], first and second [SEP]
+	max_num_tokens = max_seq_length - 3
+
+	# Since we are padding each sentence to make it the max_seq_length,
+	# we regularly don't want short sentences. That's because you will
+	# waste the machine computation if you use those short sentences.
+	# However, to make the data to be realistic, which means sometimes
+	# short sentences are written in real life, we also pick short
+	# sentences with the prob of 'short_seq_prob', which is 0.1 by default
+	target_seq_length = max_num_tokens
+	if rng.random() < short_seq_prob:
+		# rng.randoint(a, b): pick a num between a and b
+		target_seq_length = rng.randint(2, max_num_tokens)
+
+	instances = []
+	current_chunk = []
+	current_length = 0
+	i = 0
+	# loop for each token
+	while i < len(document):
+		segment = document[i]
+		current_chunk.append(segment)
+		current_length += len(segment)
+		if i == len(document) - 1 or current_length >= target_seq_length:
+			if current_chunk:
+				first_sentence_end = 1
+				if len(current_chunk) >= 2:
+					first_sentence_end = rng.randint(1, len(current_chunk) - 1)
+
+				first_tokens = []
+				for j in range(first_sentence_end):
+					first_tokens.extend(current_chunk[j])
+
+				second_tokens = []
+				if_random_next = False
+				if len(current_chunk) == 1 or rng.random() < 0.5:
+					is_random_next = True
+					target_second_length = target_seq_length - len(first_tokens)
+
+					for _ in range(10):
+						random_document_index = rng.randint(0, len(all_documents) - 1)
+						if random_document_index != document_index:
+							break
+
+					random_document = all_documents[random_document_index]
+					random_start = rng.randint(0, len(random_dcument) - 1)
+					for j in range(random_start, len(random_document)):
+						second_tokens.extend(random_document[j])
+						if len(second_tokens) >= target_second_length:
+							break
+
+					num_unused_segments = len(current_chunk) - first_sentence_end
+					i -= num_unused_segments
+
+				else:
+					is_random_next = False:
+					for j in range(first_sentence_end, len(current_chunk)):
+						second_tokens.extend(current_chunk[j])
+				truncate_seq_pair(first_tokens, second_tokens, max_num_tokens, rng)
+
+				assert len(first_tokens) >= 1
+				assert len(second_tokens) >= 1
