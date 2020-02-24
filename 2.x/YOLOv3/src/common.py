@@ -60,7 +60,7 @@ def residual_block(input_layer,
                          filters_shape=(1, 1, input_channel, filter_num1))
     conv = convolutional(conv,
                          filters_shape=(3, 3, filter_num1, filter_num2))
-    # skip connection
+    # skip connection(element-wise sum)
     residual_output = short_cut + conv
     return residual_output
 
