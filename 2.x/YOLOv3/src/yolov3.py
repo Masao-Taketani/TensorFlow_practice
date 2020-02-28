@@ -173,5 +173,36 @@ def decode(conv_output, i=0):
          output_size,
          num_of_priors_per_scale,
          len([x,y,w,h])+1(=conf)+c+class_size]
-    """     
+    """
     return tf.concat([pred_xywh, pred_conf, pred_prob], axis=-1)
+
+### need to recheck this func
+def bbox_iou(boxes1, boxes2):
+
+    boxes1_area = boxes1[..., 2] * boxes1[..., 3]
+    boxes2_area = boxes2[..., 2] * boxes2[..., 3]
+
+    boxes1 = tf.concat([boxes1[..., :2] - boxes1[..., 2:] * 0.5,
+                        boxes1[..., :2] + boxes[..., 2:] * 0.5], axis=-1)
+    boxes2 = tf.concat([boxes2[..., :2] - boxes2[..., 2:] * 0.5,
+                        boxes2[..., :2] + boxes2[..., 2:] * 0.5], axis=-1)
+
+
+def compute_loss(pred, conv, label, bboxes, i=0):
+
+    conv_shape = tf.shape(conv)
+    batch_size = conv_shape[0]
+    output_size = conv_shape[1]
+    input_size = STRIDES[i] * output_size
+    conv = tf.reshape(conv, (batch_size, output_size, output_size, 3, 5 + NUM_CLASSES))
+
+    conv_raw_conf = conv[:, :, :, :, 4:5]
+    conv_raw_prob = conv[:, :, :, :, 5:]
+    ### need to check pred and label
+    pred_xywh = pred[:, :, :, :, 0:4]
+    pred_conf = pred[:, :, :, :, 4:5]
+
+    label_xywh = label[:, :, :, :, 0:4]
+    respond_bbox = label[:, :, :, :, 4:5]
+    label_prob = label[:, :, :, :, 5:]
+    
