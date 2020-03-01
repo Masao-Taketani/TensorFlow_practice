@@ -177,6 +177,26 @@ def decode(conv_output, i=0):
     return tf.concat([pred_xywh, pred_conf, pred_prob], axis=-1)
 
 ### need to recheck this func
+def bbox_giou(boxes1, boxes2):
+
+    boxes1 = tf.concat([boxes1[..., :2] - boxes1[..., 2:] * 0.5,
+                        boxes1[..., :2] + boxes1[..., 2:] * 0.5], axis=-1)
+    boxes2 = tf.concat([boxes2[..., :2] - boxes2[..., 2:] * 0.5,
+                        boxes2[..., :2] + boxes2[..., 2:] * 0.5], axis=-1)
+
+    boxes1 = tf.concat([tf.minimum(boxes1[..., :2], boxes1[..., 2:]),
+                        tf.maximum(boxes1[..., :2], boxes1[..., 2:])], axis=-1)
+    boxes2 = tf.concat([tf.minimum(boxes2[..., :2], boxes2[..., 2:]),
+                        tf.maximum(boxes2[..., :2], boxes2[..., 2:])], axis=-1)
+
+    boxes1_area = (boxes1[..., 2] - boxes1[..., 0]) * (boxes1[..., 3] - boxes1[..., 1])
+    boxes2_area = (boxes2[..., 2] - boxes2[..., 0]) * (boxes2[..., 3] - boxes2[..., 1])
+
+    left_up = tf.maximum(boxes1[..., :2], boxes2[..., :2])
+    right_down = tf.minimum(boxes1[..., 2:], boxes2[..., 2:])
+
+
+### need to recheck this func
 def bbox_iou(boxes1, boxes2):
 
     boxes1_area = boxes1[..., 2] * boxes1[..., 3]
@@ -205,4 +225,5 @@ def compute_loss(pred, conv, label, bboxes, i=0):
     label_xywh = label[:, :, :, :, 0:4]
     respond_bbox = label[:, :, :, :, 4:5]
     label_prob = label[:, :, :, :, 5:]
-    
+
+    giou = tf.expand_dims(box_giou(pred_xywh, label_xywh), axis=-1)
