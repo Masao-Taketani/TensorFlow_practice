@@ -7,7 +7,7 @@
 - regression for boston housing
 - MLP for MNIST
 - CNN for MNIST
-- BERT
+- [BERT](https://github.com/google-research/bert)
 
 ### 2.x
-- YOLOv3
+- [YOLOv3](https://github.com/YunYang1994/TensorFlow2.0-Examples/tree/master/4-Object_Detection/YOLOV3)
