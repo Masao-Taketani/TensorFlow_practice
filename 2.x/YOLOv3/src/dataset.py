@@ -147,11 +147,19 @@ class Dataset(object):
         bbox_count = np.zeros((3,))
 
         for bbox in bboxes:
+            """
+            label file format used in this repo:
+                img_path, xmin, ymin, xmax, ymax, id, xmin, ymin, ..., id
+                Thus
+                    bbox_coor: [xmin, ymin, xmax, ymax]
+                    (img_path is already skipped before the process)
+                    bbox_class_id: [id]
+            """
             bbox_coor = bbox[:4]
-            bbox_class_ind = bbox[4]
+            bbox_class_id = bbox[4]
 
             onehot = np.zeros(self.num_classes, dtype=np.float)
-            onehot[bbox_class_ind] = 1.0
+            onehot[bbox_class_id] = 1.0
             # np.full: initialize ndarray with a specified number
             uniform_distribution = np.full(self.num_classes, 1.0 / self.num_classes)
             delta = 0.01
@@ -162,4 +170,7 @@ class Dataset(object):
                               = [0.001, 0.991, ..., 0.001]
             """
             smooth_onehot = onehot * (1 - delta) + delta * uniform_distribution
-            
+
+            bbox_xywh = np.concatenate([(bbox_coor[2:] + bbox_coor[:2]) * 0.5,
+                                        bbox_coor[2:] - bbox_coor[:2]],
+                                        axis=-1)
