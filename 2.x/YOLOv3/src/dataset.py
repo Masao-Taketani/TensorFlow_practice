@@ -170,7 +170,24 @@ class Dataset(object):
                               = [0.001, 0.991, ..., 0.001]
             """
             smooth_onehot = onehot * (1 - delta) + delta * uniform_distribution
-
+            # bbox_xywh: (cx, cy, w, h)
             bbox_xywh = np.concatenate([(bbox_coor[2:] + bbox_coor[:2]) * 0.5,
                                         bbox_coor[2:] - bbox_coor[:2]],
                                         axis=-1)
+            """
+            shape
+                bbox_xywh[np.newaxis, :]    : [1, 4]
+                self.strides[:, np.newaxis] : [3, 1]
+                bbox_xywh_scaled            : [3, 4]
+            """
+            bbox_xywh_scaled = 1.0 * bbox_xywh[np.newaxis, :] / self.strides[:, np.newaxis]
+
+            iou = []
+            exist_positive = False
+            for i in range(3):
+                anchors_xywh = np.zeros((self.anchor_per_scale, 4))
+                # np.floor(): round down to smaller int
+                anchors_xywh[:, 0:2] = np.floor(bbox_xywh_scaled[i, 0:2]).astype(np.int32) + 0.5
+                anchors_xywh[:, 2:4] = self.anchors[i]
+                # need to figure it out
+                iou_scale = self.bbox_iou(bbox_xywh_scaled[i][np.newaxis, :], anchors_xywh)
