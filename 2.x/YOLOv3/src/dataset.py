@@ -137,6 +137,15 @@ class Dataset(object):
                                              np.copy(bboxes))
         return img, bboxes
 
+    def bbox_iou(self, boxes1, boxes2):
+
+        boxes1 = np.array(boxes1)
+        boxes2 = np.array(boxes2)
+
+        boxes1_area = boxes1[..., 2] * boxes1[..., 3]
+        boxes2_area = boxes2[..., 2] * boxes2[..., 3]
+
+
     def preprocess_true_boxes(self, bboxes):
 
         label = [np.zeros((self.train_output_sizes[i],
