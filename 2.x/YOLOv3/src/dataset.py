@@ -142,9 +142,23 @@ class Dataset(object):
         boxes1 = np.array(boxes1)
         boxes2 = np.array(boxes2)
 
+        """
+        use of [..., ] :
+        (e.g)>>> test = array([[5, 4, 6, 2],
+                               [2, 4, 2, 6],
+                               [9, 5, 3, 4]])
+            >>> test[...,2]
+            array([6, 2, 3])
+            >>> test[...,3]
+            array([2, 6, 4])
+            >>> test[...,2] * test[...,3]
+            array([12, 12, 12])
+        """
+        # boxes area for each scale
         boxes1_area = boxes1[..., 2] * boxes1[..., 3]
         boxes2_area = boxes2[..., 2] * boxes2[..., 3]
 
+        boxes1 = np.concatenate([boxes1[..., :2]])
 
     def preprocess_true_boxes(self, bboxes):
 
@@ -187,7 +201,7 @@ class Dataset(object):
             shape
                 bbox_xywh[np.newaxis, :]    : [1, 4]
                 self.strides[:, np.newaxis] : [3, 1]
-                bbox_xywh_scaled            : [3, 4]
+                bbox_xywh_scaled            : [3, 4] (properly sacaled bbox for each scale)
             """
             bbox_xywh_scaled = 1.0 * bbox_xywh[np.newaxis, :] / self.strides[:, np.newaxis]
 
@@ -198,5 +212,8 @@ class Dataset(object):
                 # np.floor(): round down to smaller int
                 anchors_xywh[:, 0:2] = np.floor(bbox_xywh_scaled[i, 0:2]).astype(np.int32) + 0.5
                 anchors_xywh[:, 2:4] = self.anchors[i]
-                # need to figure it out
+                """
+                bbox_xywh_scaled[i][np.newaxis, :]  :
+                    take bbox_xywh_scaled for each scale and makes the data into 2d
+                """
                 iou_scale = self.bbox_iou(bbox_xywh_scaled[i][np.newaxis, :], anchors_xywh)
