@@ -153,12 +153,46 @@ class Dataset(object):
             array([2, 6, 4])
             >>> test[...,2] * test[...,3]
             array([12, 12, 12])
+
+        boxes area for each scale (w * h)
+        shape of boxes1_area & boxes2_area: (3, 1)
         """
-        # boxes area for each scale
         boxes1_area = boxes1[..., 2] * boxes1[..., 3]
         boxes2_area = boxes2[..., 2] * boxes2[..., 3]
-
-        boxes1 = np.concatenate([boxes1[..., :2]])
+        """
+        the below code indicates (top_left_x, top_height_y, bottom_x_right, bottom_height_y)
+        boxes1[..., :2] - boxes1[..., 2:] * 0.5 part:
+            [[cx1, cy1] - [w1 / 2, h1 / 2],         [[cx1 - w1 / 2, cy1 - h1 / 2],
+             [cx2, cy2] - [w2 / 2, h2 / 2],     =    [cx2 - w2 / 2, cy2 - h2 / 2],
+             [cx3, cy3] - [w3 / 2, h3 / 2]]          [cx3 - w3 / 2, cy3 - h3 / 2]]
+        boxes1[..., :2] + boxes1[..., 2:] * 0.5 part:
+            [[cx1, cy1] + [w1 / 2, h1 / 2],         [[cx1 + w1 / 2, cy1 + h1 / 2],
+             [cx2, cy2] + [w2 / 2, h2 / 2],     =    [cx2 + w2 / 2, cy2 + h2 / 2],
+             [cx3, cy3] + [w3 / 2, h3 / 2]]          [cx3 + w3 / 2, cy3 + h3 / 2]]
+        np.concatenate(...) part:
+             [[cx1 - w1 / 2, cy1 - h1 / 2, cx1 + w1 / 2, cy1 + h1 / 2],
+              [cx2 - w2 / 2, cy2 - h2 / 2, cx2 + w2 / 2, cy2 + h2 / 2],
+              [cx3 - w3 / 2, cy3 - h3 / 2, cx3 + w3 / 2, cy3 + h3 / 2]]
+        """
+        boxes1 = np.concatenate([boxes1[..., :2] - boxes1[..., 2:] * 0.5,
+                                 boxes1[..., :2] + boxes1[..., 2:] * 0.5], axis=-1)
+        boxes2 = np.concatenate([boxes2[..., :2] - boxes2[..., 2:] * 0.5,
+                                 boxes2[..., :2] + boxes2[..., 2:] * 0.5], axis=-1)
+        """
+        below code obtains the left up point and the right down point of
+        the intersection.
+        shape of left_up & right_down: (3, 2)
+        """
+        left_up = np.maximum(boxes1[..., :2], boxes2[..., :2])
+        right_down = np.minimum(boxes1[..., 2:], boxes2[..., 2:])
+        # calcuate the intersection width and height to obtain the area
+        inter_section = np.maximum(right_down - left_up, 0.0)
+        # intersection width * intersection height
+        # shape of inter_area: (3, 1)
+        inter_area = inter_section[..., 0] * inter_section[..., 1]
+        union_area = boxes1_area + boxes2_area - inter_area
+        # shape of the return value: (3, 1)  (iou value for each scale)
+        return inter_area / union_area
 
     def preprocess_true_boxes(self, bboxes):
 
@@ -213,7 +247,7 @@ class Dataset(object):
                 anchors_xywh[:, 0:2] = np.floor(bbox_xywh_scaled[i, 0:2]).astype(np.int32) + 0.5
                 anchors_xywh[:, 2:4] = self.anchors[i]
                 """
-                bbox_xywh_scaled[i][np.newaxis, :]  :
+                bbox_xywh_scaled[i][np.newaxis, :]:
                     take bbox_xywh_scaled for each scale and makes the data into 2d
                 """
                 iou_scale = self.bbox_iou(bbox_xywh_scaled[i][np.newaxis, :], anchors_xywh)
