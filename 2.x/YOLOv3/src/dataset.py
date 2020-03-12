@@ -244,10 +244,28 @@ class Dataset(object):
             for i in range(3):
                 anchors_xywh = np.zeros((self.anchor_per_scale, 4))
                 # np.floor(): round down to smaller int
+                # ??? why + 0.5 ???
                 anchors_xywh[:, 0:2] = np.floor(bbox_xywh_scaled[i, 0:2]).astype(np.int32) + 0.5
                 anchors_xywh[:, 2:4] = self.anchors[i]
                 """
                 bbox_xywh_scaled[i][np.newaxis, :]:
                     take bbox_xywh_scaled for each scale and makes the data into 2d
                 """
-                iou_scale = self.bbox_iou(bbox_xywh_scaled[i][np.newaxis, :], anchors_xywh)
+                ious_for_each_scale = self.bbox_iou(bbox_xywh_scaled[i][np.newaxis, :], anchors_xywh)
+                iou.append(ious_for_each_scale)
+                iou_mask = ious_for_each_scale > 0.3
+                # if any of the obtained aspect ratios ovalaps with the label
+                # over 0.3
+                if np.any(iou_mask):
+                    x_id, y_id = np.floor(bbox_xywh_scaled[i, 0:2]).astype(np.int32)
+
+                    label[i][y_id, x_id, iou_mask, :] = 0
+                    label[i][y_id, x_id, iou_mask, 0:4] = bbox_xywh
+                    label[i][y_id, x_id, iou_mask, 4:5] = 1.0
+                    label[i][y_id, x_id, iou_mask, 5:] = smooth_onehot
+
+                    bbox_id = int(bbox_count[i] % self.max_bbox_per_scale)
+                    bboxes_xywh[i][bbox_id, :4] = bbox_xywh
+                    bbox_count[i] += 1
+
+                    exist_positive = True
