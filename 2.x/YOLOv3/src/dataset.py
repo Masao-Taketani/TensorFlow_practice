@@ -196,10 +196,18 @@ class Dataset(object):
 
     def preprocess_true_boxes(self, bboxes):
 
+        # label = [(...), (...), (...)] for each scale
         label = [np.zeros((self.train_output_sizes[i],
                            self.train_output_sizes[i],
                            self.anchor_per_scale,
                            5 + self.num_classes)) for i in range(3)]
+        """
+        bbox_xywh:
+               [np.array([[0, 0, 0, 0],         np.array[[0, 0, 0, 0],
+                          [0, 0, 0, 0],      ‥           [0, 0, 0, 0],
+                               ：                              ：
+                          [0, 0, 0, 0]])                 [0, 0, 0, 0]]]
+        """
         bboxes_xywh = [np.zeros((self.max_bbox_per_scale, 4)) for _ in range(3)]
         bbox_count = np.zeros((3,))
 
@@ -245,8 +253,30 @@ class Dataset(object):
                 anchors_xywh = np.zeros((self.anchor_per_scale, 4))
                 # np.floor(): round down to smaller int
                 # ??? why + 0.5 ???
+                """
+                anchors_xywh:
+                    np.array([[np.floor(xi)+0.5, np.floor(yi)+0.5, rx(i), ry(i)],
+                              [np.floor(xi)+0.5, np.floor(yi)+0.5, rx(i+1), ry(i+1)],
+                              [np.floor(xi)+0.5, np.floor(yi)+0.5, rx(i+2), ry(i+2)]])
+
+                shape of self.anchors:
+                    np.array([[[rx0, ry0],
+                               [rx1, ry1],
+                               [rx2, ry2]],
+
+                              [[rx3, ry3],
+                               [rx4, ry4],
+                               [rx5, ry5]]
+
+                              [[rx6, ry6],
+                               [rx7, ry7],
+                               [rx8, ry8]]])
+                """
                 anchors_xywh[:, 0:2] = np.floor(bbox_xywh_scaled[i, 0:2]).astype(np.int32) + 0.5
                 anchors_xywh[:, 2:4] = self.anchors[i]
+                """
+                !start tracing from here next time!
+                """
                 """
                 bbox_xywh_scaled[i][np.newaxis, :]:
                     take bbox_xywh_scaled for each scale and makes the data into 2d
