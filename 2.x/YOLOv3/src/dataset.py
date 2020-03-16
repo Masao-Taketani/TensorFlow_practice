@@ -138,7 +138,10 @@ class Dataset(object):
         return img, bboxes
 
     def bbox_iou(self, boxes1, boxes2):
-
+        """
+        shape of boxes1(gt)                   : (1, 4)
+        shape of boxes2(anchors_with_3_ratios): (3, 4)
+        """
         boxes1 = np.array(boxes1)
         boxes2 = np.array(boxes2)
 
@@ -155,41 +158,104 @@ class Dataset(object):
             array([12, 12, 12])
 
         boxes area for each scale (w * h)
-        shape of boxes1_area & boxes2_area: (3, 1)
+        shape of boxes1_area: (1, 1)
+        shape of boxes2_area: (3, 1)
         """
         boxes1_area = boxes1[..., 2] * boxes1[..., 3]
         boxes2_area = boxes2[..., 2] * boxes2[..., 3]
         """
         the below code indicates (top_left_x, top_height_y, bottom_x_right, bottom_height_y)
         boxes1[..., :2] - boxes1[..., 2:] * 0.5 part:
-            [[cx1, cy1] - [w1 / 2, h1 / 2],         [[cx1 - w1 / 2, cy1 - h1 / 2],
-             [cx2, cy2] - [w2 / 2, h2 / 2],     =    [cx2 - w2 / 2, cy2 - h2 / 2],
-             [cx3, cy3] - [w3 / 2, h3 / 2]]          [cx3 - w3 / 2, cy3 - h3 / 2]]
+            [[cx, cy] - [w_gt / 2, h_gt / 2]] = [[cx - w_gt / 2, cy - h_gt / 2]]
         boxes1[..., :2] + boxes1[..., 2:] * 0.5 part:
-            [[cx1, cy1] + [w1 / 2, h1 / 2],         [[cx1 + w1 / 2, cy1 + h1 / 2],
-             [cx2, cy2] + [w2 / 2, h2 / 2],     =    [cx2 + w2 / 2, cy2 + h2 / 2],
-             [cx3, cy3] + [w3 / 2, h3 / 2]]          [cx3 + w3 / 2, cy3 + h3 / 2]]
+            [[cx, cy] + [w_gt / 2, h_gt / 2]] = [[cx + w_gt / 2, cy + h_gt / 2]]
         np.concatenate(...) part:
-             [[cx1 - w1 / 2, cy1 - h1 / 2, cx1 + w1 / 2, cy1 + h1 / 2],
-              [cx2 - w2 / 2, cy2 - h2 / 2, cx2 + w2 / 2, cy2 + h2 / 2],
-              [cx3 - w3 / 2, cy3 - h3 / 2, cx3 + w3 / 2, cy3 + h3 / 2]]
+            [[cx - w_gt / 2, cy - h_gt / 2, cx + w_gt / 2, cy + h_gt / 2]]
+
+        shape of boxes1: (1, 4)
         """
         boxes1 = np.concatenate([boxes1[..., :2] - boxes1[..., 2:] * 0.5,
                                  boxes1[..., :2] + boxes1[..., 2:] * 0.5], axis=-1)
+        """
+        boxes2[..., :2] - boxes2[..., 2:] * 0.5 part:
+            [[cx, cy] - [w1 / 2, h1 / 2],         [[cx - w1 / 2, cy - h1 / 2],
+             [cx, cy] - [w2 / 2, h2 / 2],     =    [cx - w2 / 2, cy - h2 / 2],
+             [cx, cy] - [w3 / 2, h3 / 2]]          [cx - w3 / 2, cy - h3 / 2]]
+        boxes2[..., :2] + boxes2[..., 2:] * 0.5 part:
+            [[cx, cy] + [w1 / 2, h1 / 2],         [[cx + w1 / 2, cy + h1 / 2],
+             [cx, cy] + [w2 / 2, h2 / 2],     =    [cx + w2 / 2, cy + h2 / 2],
+             [cx, cy] + [w3 / 2, h3 / 2]]          [cx + w3 / 2, cy + h3 / 2]]
+        np.concatenate(...) part:
+             [[cx - w1 / 2, cy - h1 / 2, cx + w1 / 2, cy + h1 / 2],
+              [cx - w2 / 2, cy - h2 / 2, cx + w2 / 2, cy + h2 / 2],
+              [cx - w3 / 2, cy - h3 / 2, cx + w3 / 2, cy + h3 / 2]]
+
+        shape of boxes2: (3, 4)
+        """
         boxes2 = np.concatenate([boxes2[..., :2] - boxes2[..., 2:] * 0.5,
                                  boxes2[..., :2] + boxes2[..., 2:] * 0.5], axis=-1)
         """
         below code obtains the left up point and the right down point of
         the intersection.
+        (e.g.)
+        >>> arr1 = np.array([[5, 1, 7, 2]])
+        >>> arr2 = np.array([[ 0,  1,  2,  3],
+                             [ 4,  5,  6,  7],
+                             [ 8,  9, 10, 11]])
+
+        >>> np.maximum(test1[..., :2], test2[..., :2])
+            np.array([[5, 1],
+                      [5, 5],
+                      [8, 9]])
+
+        >>> np.minimum(test1[..., 2:], test2[..., 2:])
+            np.array([[2, 2],
+                      [6, 2],
+                      [7, 2]])
+
         shape of left_up & right_down: (3, 2)
         """
         left_up = np.maximum(boxes1[..., :2], boxes2[..., :2])
         right_down = np.minimum(boxes1[..., 2:], boxes2[..., 2:])
-        # calcuate the intersection width and height to obtain the area
+        """
+        calcuate the intersection width and height to obtain the area
+        (e.g.)
+        >>> left_up
+            np.array([[5, 1],
+                      [5, 5],
+                      [8, 9]])
+        >>> right_down
+            np.array([[2, 2],
+                      [6, 2],
+                      [7, 2]])
+
+        >>> right_down - left_up
+            np.array([[-3,  1],
+                      [ 1, -3],
+                      [-1, -7]])
+        >>> np.maximum(right_down - left_up, 0.0)
+            np.array([[0., 1.],
+                      [1., 0.],
+                      [0., 0.]])
+        """
         inter_section = np.maximum(right_down - left_up, 0.0)
         # intersection width * intersection height
         # shape of inter_area: (3, 1)
         inter_area = inter_section[..., 0] * inter_section[..., 1]
+        """
+        shape of boxes1_area: (1, 1)
+        shape of boxes2_area: (3, 1)
+        shape of inter_area : (3, 1)
+
+        Thus it broadcasts boxes1_area into (3, 1)
+        (e.g.)
+        >>> boxes1_area
+            np.array([[5]])
+        (after broadcasting)
+            np.array([[5],
+                      [5],
+                      [5]])
+        """
         union_area = boxes1_area + boxes2_area - inter_area
         # shape of the return value: (3, 1)  (iou value for each scale)
         return inter_area / union_area
@@ -275,13 +341,17 @@ class Dataset(object):
                 anchors_xywh[:, 0:2] = np.floor(bbox_xywh_scaled[i, 0:2]).astype(np.int32) + 0.5
                 anchors_xywh[:, 2:4] = self.anchors[i]
                 """
-                !start tracing from here next time!
-                """
-                """
                 bbox_xywh_scaled[i][np.newaxis, :]:
-                    take bbox_xywh_scaled for each scale and makes the data into 2d
+                    take bbox_xywh_scaled for one scale and makes the data into 2d
+
+                bbox_iou(gt, anchors_with_3_ratios)
+                shape of gt                   : (1, 4)
+                shape of anchors_with_3_ratios: (3, 4)
                 """
                 ious_for_each_scale = self.bbox_iou(bbox_xywh_scaled[i][np.newaxis, :], anchors_xywh)
+                """
+                !start tracing from here next time!
+                """
                 iou.append(ious_for_each_scale)
                 iou_mask = ious_for_each_scale > 0.3
                 # if any of the obtained aspect ratios ovalaps with the label
