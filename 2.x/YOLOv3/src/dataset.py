@@ -276,7 +276,7 @@ class Dataset(object):
         """
         bboxes_xywh = [np.zeros((self.max_bbox_per_scale, 4)) for _ in range(3)]
         bbox_count = np.zeros((3,))
-
+        # it loops for each bbox
         for bbox in bboxes:
             """
             label file format used in this repo:
@@ -315,6 +315,7 @@ class Dataset(object):
 
             iou = []
             exist_positive = False
+            # loop over for small, middle and large objects
             for i in range(3):
                 anchors_xywh = np.zeros((self.anchor_per_scale, 4))
                 # np.floor(): round down to smaller int
@@ -338,7 +339,8 @@ class Dataset(object):
                                [rx7, ry7],
                                [rx8, ry8]]])
                 """
-                anchors_xywh[:, 0:2] = np.floor(bbox_xywh_scaled[i, 0:2]).astype(np.int32) + 0.5
+                anchors_xywh[:, 0:2] = np.floor(bbox_xywh_scaled[i, 0:2]
+                                                ).astype(np.int32) + 0.5
                 anchors_xywh[:, 2:4] = self.anchors[i]
                 """
                 bbox_xywh_scaled[i][np.newaxis, :]:
@@ -348,7 +350,8 @@ class Dataset(object):
                 shape of gt                   : (1, 4)
                 shape of anchors_with_3_ratios: (3, 4)
                 """
-                ious_for_each_scale = self.bbox_iou(bbox_xywh_scaled[i][np.newaxis, :], anchors_xywh)
+                ious_for_each_scale = self.bbox_iou(bbox_xywh_scaled[i][np.newaxis, :],
+                                                    anchors_xywh)
                 """
                 !start tracing from here next time!
                 """
@@ -357,7 +360,8 @@ class Dataset(object):
                 # if any of the obtained aspect ratios ovalaps with the label
                 # over 0.3
                 if np.any(iou_mask):
-                    x_id, y_id = np.floor(bbox_xywh_scaled[i, 0:2]).astype(np.int32)
+                    x_id, y_id = np.floor(bbox_xywh_scaled[i, 0:2]
+                                         ).astype(np.int32)
 
                     label[i][y_id, x_id, iou_mask, :] = 0
                     label[i][y_id, x_id, iou_mask, 0:4] = bbox_xywh
@@ -369,3 +373,25 @@ class Dataset(object):
                     bbox_count[i] += 1
 
                     exist_positive = True
+
+            if not exist_positive:
+                # pick best iou among all of anchors
+                best_anchor_id = np.argmax(np.array(iou).reshape(-1), axis=-1)
+                best_detect = int(best_anchor_id / self.anchor_per_scale)
+                best_anchor = int(best_anchor_id % self.anchor_per_scale)
+                x_id, y_id = np.floor(bbox_xywh_scaled[best_detect, 0:2]
+                                     ).astype(np.int32)
+
+                label[best_detect][y_id, x_id, best_anchor, :] = 0
+                label[best_detect][y_id, x_id, best_anchor, 0:4] = bbox_xywh
+                label[best_detect][y_id, x_id, best_anchor, 4:5] = 1.0
+                label[best_detect][y_id, x_id, best_anchor, 5:] = smooth_onehot
+
+                bbox_id = int(bbox_count[best_detect] % self.max_bbox_per_scale)
+                bboxes_xywh[best_detect][bbox_id, :4] = bbox_xywh
+                bbox_count[best_detect] += 1
+
+        label_sbbox, label_mbbox, label_lbbox = label
+        sbboxes, mbboxes, lbboxes = bboxes_xywh
+
+        return label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes
