@@ -101,9 +101,43 @@ class Dataset(object):
                     if idx >= self.num_samples:
                         idx -= self.num_samples
                     annotation = self.annotations[idx]
-                    img, bboxes = self.parse_annotation(annotation)
+                    image, bboxes = self.parse_annotation(annotation)
                     label_bboxes, pred_bboxes = self.preprocess_true_boxes(bboxes)
+                    label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes = self.preprocess_true_boxes(bboxes)
 
+                    batch_image[num, :, :, :] = image
+                    batch_label_sbbox[num, :, :, :, :] = label_sbbox
+                    batch_label_mbbox[num, :, :, :, :] = label_mbbox
+                    batch_label_lbbox[num, :, :, :, :] = label_lbbox
+                    batch_sbboxes[num, :, :] = sbboxes
+                    batch_mbboxes[num, :, :] = mbboxes
+                    batch_lbboxes[num, :, :] = lbboxes
+                    num += 1
+
+                self.batch_count += 1
+                batch_smaller_target = batch_label_sbbox, batch_sbboxes
+                batch_medium_target = batch_label_mbbox, batch_mbboxes
+                batch_larger_target = batch_label_lbbox, batch_lbboxes
+
+                return batch_image, (batch_smaller_target, batch_medium_target, batch_larger_target)
+            else:
+                self.batch_count = 0
+                np.random.shuffle(self.annotations)
+                raise StopIteration
+
+    def random_horizontal_flip(self, image, bboxes):
+
+        if random.random() < 0.5:
+            _, w, _ = image.shape
+            image = image[:, ::-1, :]
+            """
+            after horizontal flip we get:
+                    new xmin = w - xmax
+                    new xmax = w - xmin
+            """
+            bboxes[:, [0,2]] = w - bboxes[:, [2,0]]
+
+        return image, bboxes
 
     def parse_annotation(self, annotation):
 
@@ -119,6 +153,11 @@ class Dataset(object):
         original_list = list(range(10)) # [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
         mapped_list = map(lambda x: x**2, original_list)
         print(list(mapped_list)) # [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]
+
+        bboxes:
+            np.array([xmin, ymin, xmax, ymax, id, xmin, ymin, ..., id
+            Thus
+            ######### need to trace this part ###########
         """
         bboxes = np.array([list(map(int, box.split(","))) for box in line[1:]])
 
