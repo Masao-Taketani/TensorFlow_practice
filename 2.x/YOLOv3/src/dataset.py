@@ -35,6 +35,12 @@ class Dataset(object):
     def load_annotations(self, dataset_type):
         with open(self.anno_path, "r") as f:
             txt = f.readlines()
+            """
+            annotations = [line 1,
+                          line 2,
+                            :
+                          line n]
+            """
             annotations = [line.strip() for line in txt \
                           if len(line.strip().split()[1:]) != 0]
         np.random.shuffle(annotations)
@@ -100,6 +106,7 @@ class Dataset(object):
                     idx = self.batch_count * self.batch_size + num
                     if idx >= self.num_samples:
                         idx -= self.num_samples
+                    # annotation = line idx
                     annotation = self.annotations[idx]
                     image, bboxes = self.parse_annotation(annotation)
                     label_bboxes, pred_bboxes = self.preprocess_true_boxes(bboxes)
@@ -141,11 +148,11 @@ class Dataset(object):
 
     def parse_annotation(self, annotation):
 
-        line = annotation.split()
-        img_path = line[0]
+        splted_line = annotation.split()
+        img_path = splted_line[0]
         if not os.path.exists(img_path):
             raise KeyError("The image file %s does not exist!".format(img_path))
-        img = cv2.imread(img_path)
+        np_img = cv2.imread(img_path)
         """
         usage: map(func or lambda_exp, sequence_obj)
         return: map obj
@@ -155,26 +162,27 @@ class Dataset(object):
         print(list(mapped_list)) # [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]
 
         bboxes:
-            np.array([xmin, ymin, xmax, ymax, id, xmin, ymin, ..., id
-            Thus
-            ######### need to trace this part ###########
+            np.array([[int(xmin1), int(ymin1), int(xmax1), int(ymax1), int(id1)],
+                      [int(xmin2), int(ymin2), int(xmax2), int(ymax2), int(id2)],
+                                                :
+                      [int(xminn), int(yminn), int(xmaxn), int(ymaxn), int(idn)]])
         """
-        bboxes = np.array([list(map(int, box.split(","))) for box in line[1:]])
+        bboxes = np.array([list(map(int, box.split(","))) for box in splted_line[1:]])
 
         if self.data_aug:
-            img, bboxes = self.random_horizontal_flip(np.copy(img),
+            np_img, bboxes = self.random_horizontal_flip(np.copy(np_img),
                                                       np.copy(bboxes))
-            img, bboxes = self.random_crop(np.copy(img),
+            np_img, bboxes = self.random_crop(np.copy(np_img),
                                            np.copy(bboxes))
-            img, bboxes = self.random_translate(np.copy(img),
+            np_img, bboxes = self.random_translate(np.copy(np_img),
                                                 np.copy(bboxes))
 
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img, bboxes = utils.image_preprocess(np.copy(img),
+        rgb_img = cv2.cvtColor(np_img, cv2.COLOR_BGR2RGB)
+        rgb_img, bboxes = utils.image_preprocess(np.copy(rgb_img),
                                              [self.train_input_size,
                                              self.train_input_size],
                                              np.copy(bboxes))
-        return img, bboxes
+        return rgb_img, bboxes
 
     def bbox_iou(self, boxes1, boxes2):
         """
