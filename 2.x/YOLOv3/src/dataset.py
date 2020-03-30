@@ -46,11 +46,16 @@ class Dataset(object):
         np.random.shuffle(annotations)
         return annotations
 
-    # if an object is requested to work as an iterator,
-    # it calls __iter__() method
+    """
+    if an object is requested to work as an iterator(put after 'in' inside of for loop),
+    it calls __iter__() method.
+    """
     def __iter__(self):
         return self
 
+    """
+    it keeps calling __next__() till StopIteration Expection.
+    """
     def __next__(self):
 
         with tf.device("/cpu:0"):
