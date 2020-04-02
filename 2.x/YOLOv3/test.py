@@ -53,3 +53,43 @@ with open(cfg.TEST.ANNOT_PATH, "r") as annotation_file:
         else:
             bboxes_gt, classes_gt = bbox_data_gt[:, :4], bbox_data_gt[:, 4]
         ground_truth_path = os.path.join(ground_truth_path, str(num) + ".txt")
+
+        print("=> ground truth of %s:" % file_name)
+        num_bbox_gt = len(bboxes_gt)
+        with open(ground_truth_path, "w") as f:
+            for i in range(num_bbox_gt):
+                class_name = CLASSES[classes_gt[i]]
+                xmin, ymin, xmax, ymax = list(map(str, bboxes_gt[i]))
+                bbox_mess = " ".join([class_name, xmin, ymin, xmax, ymax]) + "\n"
+                f.write(bbox_mess)
+                print("\t" + str(bbox_mess).strip())
+
+        print("=> predict result of %s:" % file_name)
+        predict_result_path = os.path.join(predicted_dir_path, str(num) + ".txt")
+        # need to check the data dims
+        image_size = np_rgb_img.shape[:2]
+        image_data = utils.image_preprocess(np.copy(np_rgb_img), [INPUT_SIZE, INPUT_SIZE])
+        image_data = image_data[np.newaxis, ...].astype(np.float32)
+        # need to investigate the following part ---from here
+        pred_bbox = model.predict(image_data)
+        pred_bbox = [tf.reshape(x, (-1, tf.shape(x)[-1])) for x in pred_bbox]
+        pred_bbox = tf.concat(pred_bbox, axis=0)
+        # ---ends here
+        bboxes = utils.postprocess_boxes(pred_bbox, image_size, INPUT_SIZE, cfg.TEST.SCORE_THRESHOLD)
+        bboxes = utils.nms(bboxes, cfg.TEST.IOU_THRESHOLD, method="nms")
+
+        if cfg.TEST.DETECTED_IMAGE_PATH is not None:
+            image = utils.draw_bbox(np_rgb_img, bboxes)
+            cv2.imwrite(cfg.TEST.DETECTED_IMAGE_PATH + file_name, image)
+
+        with open(predict_result_path, "w") as f:
+            for bbox in bboxes:
+                coord = np.array(bbox[:4], dtype=np.int32)
+                score = bbox[4]
+                class_idx = int(bbox[5])
+                class_name = CLASSES[class_idx]
+                score = "%.4f" % score
+                xmin, ymin, xmax, ymax = list(map(str, coord))
+                bbox_mess = " ".join([class_name, score, xmin, ymin, xmax, ymax]) + "\n"
+                f.write(bbox_mess)
+                print("\t" + str(bbox_mess).strip())
