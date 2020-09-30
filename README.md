@@ -8,6 +8,7 @@
 - [MLP for MNIST](https://github.com/Masao-Taketani/TensorFlow_practice/blob/master/1.x/mnist_model(multi-class_classification).ipynb)
 - [CNN for MNIST](https://github.com/Masao-Taketani/TensorFlow_practice/blob/master/1.x/mnist_model(CNN).ipynb)
 - [BERT](https://github.com/Masao-Taketani/TensorFlow_practice/tree/master/1.x/BERT)
+- [GPT](https://github.com/Masao-Taketani/TensorFlow_practice/tree/master/1.x/GPT)
 
 ### 2.x
 - [YOLOv3](https://github.com/Masao-Taketani/TensorFlow_practice/tree/master/2.x/YOLOv3)
