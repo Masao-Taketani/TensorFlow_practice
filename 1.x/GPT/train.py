@@ -69,3 +69,21 @@ def mask_attn_weights(w):
     b = tf.reshape(b, [1, 1, n, n])
     w = w * b + -1e9 * (1 - b)
     return w
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--desc", type=str)
+    parser.add_argument("--dataset", type=str)
+
+    args = parser.parse_args()
+    print(args)
+    """
+    [references]
+    globals().update: https://stackoverflow.com/questions/1589968/python-difference-between-global-globals-updatevar
+    __dict__: http://coolpythontips.blogspot.com/2015/12/dict.html
+    """
+    globals().update(args.__dict__)
+    random.seed(seed)
+    np.random.seed(seed)
+    tf.set_random_seed(seed)
