@@ -75,10 +75,44 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--desc", type=str)
     parser.add_argument("--dataset", type=str)
+    parser.add_argument("--log_dir", type=str, default="log/")
+    parser.add_argument("--save_dir", type=str, default="save/")
+    parser.add_argument("--data_dir", type=str, default="data/")
+    parser.add_argument("--submission_dir", type=str, default="submission/")
+    parser.add_argument("--submit", action="store_true")
+    parser.add_argument("--analysis", action="store_true")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--n_iter", type=int, default=3)
+    parser.add_argument("--n_batch", type=int, default=8)
+    parser.add_argument("--max_grad_norm", type=int, default=1)
+    parser.add_argument("--lr", type=float, default=6.25e-5)
+    parser.add_argument("--lr_warmup", type=float, default=0.002)
+    parser.add_argument("--n_ctx", type=int, default=512)
+    parser.add_argument("--n_embd", type=int, default=768)
+    parser.add_argument("--n_head", type=int, default=12)
+    parser.add_argument("--n_layer", type=int, default=12)
+    parser.add_argument("--embd_pdrop", type=float, default=0.1)
+    parser.add_argument("--attn_pdrop", type=float, default=0.1)
+    parser.add_argument("--resid_pdrop", type=float, default=0.1)
+    parser.add_argument("--clf_pdrop", type=float, default=0.1)
+    parser.add_argument("--l2", type=float, default=0.01)
+    parser.add_argument("--vector_l2", action="store_true")
+    parser.add_argument("--n_gpu", type=int, default=4)
+    parser.add_argument("--opt", type=str, default="adam")
+    parser.add_argument("--afn", type=str, default="gelu")
+    parser.add_argument("--lr_schedule", type=str, default="warmup_linear")
+    parser.add_argument("--encoder_path", type=str, default="model/encoder_bpe_40000.json")
+    parser.add_argument("--bpe_path", type=str, default="model/vocab_40000.bpe")
+    parser.add_argument("--n_transfer", type=int, default=12)
+    parser.add_argument("--lm_coef", type=float, default=0.5)
+    parser.add_argument("--b1", type=float, default=0.9)
+    parser.add_argument("--b2", type=float, default=0.999)
+    parser.add_argument("--e", type=float, default=1e-8)
 
     args = parser.parse_args()
     print(args)
     """
+    globals().update(args.__dict__) makes args as global variables
     [references]
     globals().update: https://stackoverflow.com/questions/1589968/python-difference-between-global-globals-updatevar
     __dict__: http://coolpythontips.blogspot.com/2015/12/dict.html
@@ -87,3 +121,13 @@ if __name__ == "__main__":
     random.seed(seed)
     np.random.seed(seed)
     tf.set_random_seed(seed)
+
+    logger = ResultLogger(path=os.path.join(log_dir, "{}.json".format(desc)), **args.__dict__)
+    text_encoder = TextEncoder(encoder_path, bpe_path)
+    encoder =text_encoder.encoder
+    n_vocab = len(text_encoder.encoder)
+
+    (trX1, trX2, trX3, trY), (vaX1, vaX2, vaX3, vaY), (teX1, teX2, teX3) = encode_dataset(
+                                                                            rocstories(data_dir),
+                                                                            encoder=text_encoder
+                                                                            )
