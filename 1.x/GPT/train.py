@@ -70,6 +70,22 @@ def mask_attn_weights(w):
     w = w * b + -1e9 * (1 - b)
     return w
 
+def transform_roc(X1, X2, X3):
+    n_batch = len(X1)
+    """
+    xmb.shape (batch size, x12 and x13, context length, context tokens and position tokens)
+    mmb.shape (batch size, x12 and x13, context length)
+    """
+    xmb = np.zeros((n_batch, 2, n_ctx, 2), dtype=np.int32)
+    mmb = np.zeros((n_batch, 2, n_ctx), dtype=np.float32)
+    start = encoder["_start_"]
+    delimiter = encoder["_delimiter_"]
+    for i, (x1, x2, x3), in enumerate(zip(X1, X2, X3)):
+        x12 = [start] + x1[:max_len] + [delimiter] + x2[:max_len] + [clf_token]
+        x13 = [start] + x1[:max_len] + [delimiter] + x3[:max_len] + [clf_token]
+        l12 = len(x12)
+        l13 = len(x13)
+        
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -131,3 +147,30 @@ if __name__ == "__main__":
                                                                             rocstories(data_dir),
                                                                             encoder=text_encoder
                                                                             )
+    n_y = 2
+    encoder["_start_"] = len(encoder)
+    encoder["_delimiter_"] = len(encoder)
+    encoder["_classify_"] = len(encoder)
+    clf_token = encoder["_classify_"]
+    n_special = 3
+    max_len = n_ctx // 2 - 2
+    """
+    set the context length from the longest sequence from train, validation
+    and test datasets + 3(special tokens used in finetuning)
+    or the context length which is originally set
+    """
+    n_ctx = min(max([len(x1[:max_len]) + max(len(x2[:max_len]),
+                                             len(x3[:max_len]))
+                      for x1, x2, x3 in zip(trX1, trX2, trX3)]
+                     +
+                     [len(x1[:max_len]) + max(len(x2[:max_len]),
+                                              len(x3[:max_len]))
+                      for x1, x2, x3 in zip(vaX1, vaX2, vaX3)]
+                     +
+                     [len(x1[:max_len]) + max(len(x2[:max_len]),
+                                              len(x3[:max_len]))
+                      for x1, x2, x3 in zip(teX1, teX2, teX3)])
+                + 3,
+                n_ctx)
+
+    trX, trM = transform_roc(trX1, trX2, trX3)
