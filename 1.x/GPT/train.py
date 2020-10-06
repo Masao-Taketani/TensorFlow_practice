@@ -70,6 +70,52 @@ def mask_attn_weights(w):
     w = w * b + -1e9 * (1 - b)
     return w
 
+def mgpu_train(*xs):
+    gpu_ops = []
+    gpu_grads = []
+    """
+    tf.split(value, num_or_size_splits, axis):
+        if you have x such as
+       x  = [[[   0    1    2    3    4]
+              [   5    6    7    8    9]
+              [  10   11   12   13   14]
+              [  15   16   17   18   19]
+              [  20   21   22   23   24]]
+
+             [[   0   10   20   30   40]
+              [  50   60   70   80   90]
+              [ 100  110  120  130  140]
+              [ 150  160  170  180  190]
+              [ 200  210  220  230  240]]
+
+             [[   0  100  200  300  400]
+              [ 500  600  700  800  900]
+              [1000 1100 1200 1300 1400]
+              [1500 1600 1700 1800 1900]
+              [2000 2100 2200 2300 2400]]]
+    then y1, y2, y3 = tf.split(x, 3, 0) is going to be
+
+        y1 = [[[ 0  1  2  3  4]
+               [ 5  6  7  8  9]
+               [10 11 12 13 14]
+               [15 16 17 18 19]
+               [20 21 22 23 24]]]
+
+        y2 = [[[  0  10  20  30  40]
+               [ 50  60  70  80  90]
+               [100 110 120 130 140]
+               [150 160 170 180 190]
+               [200 210 220 230 240]]]
+
+        y3 = [[[   0  100  200  300  400]
+               [ 500  600  700  800  900]
+               [1000 1100 1200 1300 1400]
+               [1500 1600 1700 1800 1900]
+               [2000 2100 2200 2300 2400]]]
+    [reference]https://qiita.com/supersaiakujin/items/464cc053418e9a37fa7b#split
+    """
+    xs = (tf.split(x, n_gpu, 0) for x in xs)
+
 def transform_roc(X1, X2, X3):
     n_batch = len(X1)
     """
@@ -85,7 +131,16 @@ def transform_roc(X1, X2, X3):
         x13 = [start] + x1[:max_len] + [delimiter] + x3[:max_len] + [clf_token]
         l12 = len(x12)
         l13 = len(x13)
-        
+        xmb[i, 0, :l12, 0] = x12
+        xmb[i, 1, :l13, 0] = x13
+        # mmb is used for loss calculation for each token position so that
+        # the loss is calculated only for non-pad tokens
+        mmb[i, 0, :l12] = 1
+        mmb[i, 1, :l13] = 1
+    # set indexes for each position
+    xmb[:, :, :, 1] = np.arange(n_vocab + n_special, n_vocab + n_special + n_ctx)
+    return xmb, mmb
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -174,3 +229,22 @@ if __name__ == "__main__":
                 n_ctx)
 
     trX, trM = transform_roc(trX1, trX2, trX3)
+    vaX, vaM = transform_roc(vaX1, vaX2, vaX3)
+    if submit:
+        teX, teM = transform_roc(teX1, teX2, teX3)
+
+    n_train = len(trY)
+    n_valid = len(vaY)
+    n_batch_train = n_batch * n_gpu
+    n_updates_total = (n_train // n_batch_train) * n_iter
+
+    # n_batch_train = n_batch * n_gpu is used for the batch size
+    X_train = tf.placeholder(tf.int32, [n_batch_train, 2, n_ctx, 2])
+    M_train = tf.placeholder(if.float32, [n_batch_train, 2, n_ctx])
+    X = tf.placeholder(tf.int32, [None, 2, n_ctx, 2])
+    M = tf.placeholder(tf.float32, [None, 2, n_ctx])
+
+    Y_train = tf.placeholder(tf.int32, [n_batch_train])
+    Y = tf.placeholder(tf.int32, [None])
+
+    train, logits, clf_losses, lm_losses = mgpu_train(X_train, M_train, Y_train)
