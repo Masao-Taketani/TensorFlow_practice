@@ -70,6 +70,26 @@ def mask_attn_weights(w):
     w = w * b + -1e9 * (1 - b)
     return w
 
+def embed(X, we):
+    we = convert_gradient_to_tensor(we)
+    e = tf.gather(we, X)
+    h = tf.reduce_sum(e, 2)
+    return h
+
+def model(X, M, Y, train=False, reuse=False):
+    with tf.variable_scope("model", reuse=reuse):
+        we = tf.get_variable("we",
+                             [n_vocab + n_special + n_ctx, n_embd],
+                             initializer=tf.random_normal_initializer(stddev=0.02))
+        we = dropout(we, embd_pdrop, train)
+
+        # after reshaping, X.shape is [batch_size * 2(x12 and x13), n_ctx, 2]
+        X = tf.reshape(X, [-1, n_ctx, 2])
+        # after reshaping, M.shape is [batch_size * 2(x12 and x13), n_ctx]
+        M = tf.reshape(M, [-1, n_ctx])
+
+        h = embed(X, we)
+
 def mgpu_train(*xs):
     gpu_ops = []
     gpu_grads = []
@@ -115,6 +135,12 @@ def mgpu_train(*xs):
     [reference]https://qiita.com/supersaiakujin/items/464cc053418e9a37fa7b#split
     """
     xs = (tf.split(x, n_gpu, 0) for x in xs)
+    for i, xs in enumerate(zip(*xs)):
+        do_reuse = True if i > 0 else None
+        with tf.device(assign_to_gpu(i, "/gpu:0")), tf.variable_scope(tf.get_variable_scope(),
+                                                                      reuse=do_reuse):
+            clf_logits, clf_losses, lm_losses = model(*xs, train=True, reuse=do_reuse)
+
 
 def transform_roc(X1, X2, X3):
     n_batch = len(X1)
