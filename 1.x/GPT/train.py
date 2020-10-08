@@ -70,9 +70,97 @@ def mask_attn_weights(w):
     w = w * b + -1e9 * (1 - b)
     return w
 
+def split_states(x, n):
+    x_shape = shape_list(x)
+    m = x_shape[-1]
+    """
+    from [batch, n_ctx, n_embd]
+    to [batch, n_ctx, n_head, n_embd//n_head]
+    """
+    new_x_shape = x_shape[:-1] + [n, m//n]
+    return tf.reshape(x, new_x_shape)
+
+def split_heads(x, n, k=False):
+    if k:
+        """
+        from [batch, n_ctx, n_head, n_embd//n_head]
+        to [batch, n_head, n_embd//n_head, n_ctx]
+        """
+        return tf.transpose(split_states(x, n), [0, 2, 3, 1])
+    else:
+        """
+        from [batch, n_ctx, n_head, n_embd//n_head]
+        to [batch, n_head, n_ctx, n_embd//n_head]
+        """
+        return tf.transpose(split_states(x, n), [0, 2, 1, 3])
+
+def conv1d(x,
+           scope,
+           nf,
+           rf,
+           w_init=tf.random_normal_initializer(stddev=0.02),
+           b_init=tf.constant_initializer(0),
+           pad="VALID",
+           train=False):
+
+    with tf.variable_scope(scope):
+        nx = shape_list(x)[-1]
+        w = tf.get_variable("w", [rf, nx, nf], initializer=w_init)
+        b = tf.get_variable("b", [nf], initializer=b_init)
+        # for faster 1x1 conv
+        if rf == 1:
+            c = tf.reshape(tf.matmul(tf.reshape(x, [-1, nx]),
+                                     tf.reshape(w, [-1, nf])) + b,
+                           shape_list(x)[:-1]+[nf])
+        # was used to train LM
+        else:
+            c = tf.nn.conv1d(X, w, stride=1, padding=pad) + b
+        return c
+
+def attn(x, scope, n_state, n_head, train=False, scale=False):
+    assert n_state % n_head == 0
+    with tf.variable_scope(scope):
+        c = conv1d(x, "c_attn", n_state*3, 1, train=train)
+        """
+        the blow code splits linear transformed x into 3 apart by the embedding axis
+        (e.g.) if n_embed = 768, then the embeddings for q, k and v will be
+        768/3 = 256
+        """
+        q, k, v = tf.split(c, 3, 2)
+        q = split_heads(q, n_head)
+        k = split_heads(k, n_head, k=True)
+        v = split_heads(v, n_head)
+        a = _attn(q, k, v, train=train, scale=scale)
+
+
+def block(x, scope, train=False, scale=False):
+    with tf.variable_scope(scope):
+        nx = shape_list(x)[-1]
+        a = attn(x, "attn", nx, n_head, train=train, scale=scale)
+
 def embed(X, we):
     we = convert_gradient_to_tensor(we)
+    """
+    tf.gather(params, indices):
+    axis: Defaults to the first non-batch dimension.
+    (e.g.)
+    >>> a = tf.constant([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]])
+    >>> tf.gather(a, [1,2])
+    <tf.Tensor: id=15, shape=(2, 3), dtype=float32, numpy= array([[4., 5., 6.],
+                                                                  [7., 8., 9.]],
+                                                                 dtype=float32)>
+    [reference]
+    https://www.tensorflow.org/api_docs/python/tf/gather
+    https://bit.ly/3iG15cu
+
+    shape of we: [n_vocab + n_special + n_ctx, n_embd]
+    shape of X: [batch_size * 2(x12 and x13), n_ctx, 2]
+    ? shape of e: [batch_size * 2(x12 and x13), n_ctx, 2, n_embd]
+    """
     e = tf.gather(we, X)
+    """
+    ? shape of h: [batch_size * 2(x12 and x13), n_ctx, n_embd]
+    """
     h = tf.reduce_sum(e, 2)
     return h
 
@@ -89,6 +177,9 @@ def model(X, M, Y, train=False, reuse=False):
         M = tf.reshape(M, [-1, n_ctx])
 
         h = embed(X, we)
+        for layer in range(n_layer):
+            h = block(h, "h%d"%layer, train=train, scale=True)
+
 
 def mgpu_train(*xs):
     gpu_ops = []
@@ -226,8 +317,7 @@ if __name__ == "__main__":
 
     (trX1, trX2, trX3, trY), (vaX1, vaX2, vaX3, vaY), (teX1, teX2, teX3) = encode_dataset(
                                                                             rocstories(data_dir),
-                                                                            encoder=text_encoder
-                                                                            )
+                                                                            encoder=text_encoder)
     n_y = 2
     encoder["_start_"] = len(encoder)
     encoder["_delimiter_"] = len(encoder)
