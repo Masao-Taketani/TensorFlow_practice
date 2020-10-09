@@ -70,6 +70,18 @@ def mask_attn_weights(w):
     w = w * b + -1e9 * (1 - b)
     return w
 
+def _attn(q, k, v, train=False, scale=False):
+    w = tf.matmul(q, k)
+    if scale:
+        n_state = shape_list(v)[-1]
+        w = w * tf.rsqrt(tf.cast(n_state, tf.float32))
+
+    w = mask_attn_weights(w)
+    w = tf.nn.softmax(w)
+    w = dropout(w, attn_pdrop, train)
+    a = tf.matmul(w, v)
+    return a
+
 def split_states(x, n):
     x_shape = shape_list(x)
     m = x_shape[-1]
@@ -78,6 +90,11 @@ def split_states(x, n):
     to [batch, n_ctx, n_head, n_embd//n_head]
     """
     new_x_shape = x_shape[:-1] + [n, m//n]
+    return tf.reshape(x, new_x_shape)
+
+def merge_states(x):
+    x_shape = shape_list(x)
+    new_x_shape = x_shape[:-2] + [np.prod(x_shape[-2:])]
     return tf.reshape(x, new_x_shape)
 
 def split_heads(x, n, k=False):
@@ -123,7 +140,7 @@ def attn(x, scope, n_state, n_head, train=False, scale=False):
         c = conv1d(x, "c_attn", n_state*3, 1, train=train)
         """
         the blow code splits linear transformed x into 3 apart by the embedding axis
-        (e.g.) if n_embed = 768, then the embeddings for q, k and v will be
+        (e.g.) if n_embd = 768, then the embeddings for q, k and v will be
         768/3 = 256
         """
         q, k, v = tf.split(c, 3, 2)
@@ -131,12 +148,28 @@ def attn(x, scope, n_state, n_head, train=False, scale=False):
         k = split_heads(k, n_head, k=True)
         v = split_heads(v, n_head)
         a = _attn(q, k, v, train=train, scale=scale)
+        a = merge_heads(a)
+        a = conv1d(a, "c_proj", n_state, 1, train=train)
+        a = dropout(a, resid_pdrop, train)
+        return a
 
+def mlp(x, scope, n_state, train=False):
+    with tf.variable_scope(scope):
+        nx = shape_list(x)[-1]
+        act = act_fn[afn]
+        h = act(conv1d(x, "c_fc", n_state, 1, train=train))
+        h2 = conv1d(h, "c_proj", nx, 1, train=train)
+        h2 = dropout(h2, resid_ndrop, train)
+        return h2
 
 def block(x, scope, train=False, scale=False):
     with tf.variable_scope(scope):
         nx = shape_list(x)[-1]
         a = attn(x, "attn", nx, n_head, train=train, scale=scale)
+        n = norm(x + a, "ln_1")
+        m = mlp(n, "mlp", nx * 4, train=train)
+        h = norm(n + m, "ln_2")
+        return h
 
 def embed(X, we):
     we = convert_gradient_to_tensor(we)
@@ -180,6 +213,36 @@ def model(X, M, Y, train=False, reuse=False):
         for layer in range(n_layer):
             h = block(h, "h%d"%layer, train=train, scale=True)
 
+        lm_h = tf.reshape(h[:, :-1], [-1, n_embd])
+        lm_logits = tf.matmul(lm_h, we, transpose_b=True)
+        lm_losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=lm_logits,
+                                                                   labels=tf.reshape(X[:, 1:, 0],
+                                                                                     [-1]))
+        lm_losses = tf.reshape(lm_losses, [shape_list(X)[0], shape_list(X)[1] - 1])
+        lm_losses = tf.recude_sum(lm_losses * M[:, 1:], 1) / tf.recude_sum(M[:, 1:], 1)
+
+        clf_h = tf.reshape(h, [-1, n_embd])
+        pool_idx = tf.cast(tf.argmax(tf.cast(tf.equal(X[:, :, 0],
+                                                      clf_token),
+                                             tf.float32),
+                                     1),
+                           tf.int32)
+        clf_h = tf.gather(clf_h,
+                          tf.range(shape_list(X)[0],
+                                   dtype=tf.int32) * n_ctx + pool_idx)
+
+        clf_h = tf.reshape(clf_h, [-1, 2, n_embd])
+        if train and clf_pdrop > 0:
+            shape = shape_list(clf_h)
+            shape[1] = 1
+            clf_h = tf.nn.dropout(clf_h, 1 - clf_pdrop, shape)
+        clf_h = tf.reshape(clf_h, [-1, n_embd])
+        clf_logits = clf(clf_h, 1, train=train)
+        clf_logits = tf.reshape(clf_logits, [-1, 2])
+
+        clf_losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=clf_logits,
+                                                                    labels=Y)
+        return clf_logits, clf_losses, lm_losses
 
 def mgpu_train(*xs):
     gpu_ops = []
